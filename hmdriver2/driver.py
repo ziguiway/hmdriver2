@@ -248,6 +248,23 @@ class Driver:
 
         return _Watcher()
 
+    @cached_property
+    def watcher(self):
+        """
+        PC-side background rules (poll-based, thread-safe with :class:`HmClient`).
+
+        Usage::
+
+            d.watcher("ok").when(text="确定").click()
+            d.watcher("skip").when_xpath('//Button[@text="跳过"]').click()
+            d.watcher.start(interval=0.3)
+            # main script …
+            d.watcher.stop()
+            d.watcher.remove("ok")
+        """
+        from ._watcher import WatcherManager
+        return WatcherManager(self)
+
     @delay
     def go_back(self):
         self.hdc.send_key(KeyCode.BACK)

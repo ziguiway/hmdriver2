@@ -4,6 +4,7 @@ import json
 import time
 import os
 import hashlib
+import threading
 import typing
 from typing import Optional
 from datetime import datetime
@@ -24,6 +25,8 @@ class HmClient:
     def __init__(self, serial: str):
         self.hdc = HdcWrapper(serial)
         self.sock = None
+        # Serialize all Hypium socket traffic (main thread vs background watcher, etc.)
+        self._io_lock = threading.RLock()
 
     @cached_property
     def local_port(self):
@@ -94,49 +97,51 @@ class HmClient:
         Raises:
         InvokeHypiumError: If the API call returns an exception in the response.
         """
+        return self._invoke_tracked(api, this, args)
 
-        request_id = datetime.now().strftime("%Y%m%d%H%M%S%f")
-        params = {
-            "api": api,
-            "this": this,
-            "args": args,
-            "message_type": "hypium"
-        }
-
-        msg = {
-            "module": "com.ohos.devicetest.hypiumApiHelper",
-            "method": "callHypiumApi",
-            "params": params,
-            "request_id": request_id
-        }
-
-        self._send_msg(msg)
-        raw_data = self._recv_msg(decode=True)
-        data = HypiumResponse(**(json.loads(raw_data)))
-        if data.exception:
-            raise InvokeHypiumError(data.exception)
-        return data
+    def _invoke_tracked(self, api: str, this: str, args: typing.List) -> HypiumResponse:
+        with self._io_lock:
+            request_id = datetime.now().strftime("%Y%m%d%H%M%S%f")
+            params = {
+                "api": api,
+                "this": this,
+                "args": args,
+                "message_type": "hypium"
+            }
+            msg = {
+                "module": "com.ohos.devicetest.hypiumApiHelper",
+                "method": "callHypiumApi",
+                "params": params,
+                "request_id": request_id
+            }
+            self._send_msg(msg)
+            raw_data = self._recv_msg(decode=True)
+            data = HypiumResponse(**(json.loads(raw_data)))
+            if data.exception:
+                raise InvokeHypiumError(data.exception)
+            return data
 
     def invoke_captures(self, api: str, args: typing.List = []) -> HypiumResponse:
-        request_id = datetime.now().strftime("%Y%m%d%H%M%S%f")
-        params = {
-            "api": api,
-            "args": args
-        }
+        with self._io_lock:
+            request_id = datetime.now().strftime("%Y%m%d%H%M%S%f")
+            params = {
+                "api": api,
+                "args": args
+            }
 
-        msg = {
-            "module": "com.ohos.devicetest.hypiumApiHelper",
-            "method": "Captures",
-            "params": params,
-            "request_id": request_id
-        }
+            msg = {
+                "module": "com.ohos.devicetest.hypiumApiHelper",
+                "method": "Captures",
+                "params": params,
+                "request_id": request_id
+            }
 
-        self._send_msg(msg)
-        raw_data = self._recv_msg(decode=True)
-        data = HypiumResponse(**(json.loads(raw_data)))
-        if data.exception:
-            raise InvokeCaptures(data.exception)
-        return data
+            self._send_msg(msg)
+            raw_data = self._recv_msg(decode=True)
+            data = HypiumResponse(**(json.loads(raw_data)))
+            if data.exception:
+                raise InvokeCaptures(data.exception)
+            return data
 
     def start(self):
         logger.info("Start HmClient connection")
