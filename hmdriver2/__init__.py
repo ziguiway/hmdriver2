@@ -16,4 +16,6 @@ console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
 
 
-__all__ = ['logger']
+from .match import MatchPattern
+
+__all__ = ['logger', 'MatchPattern']

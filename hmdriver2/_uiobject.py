@@ -1,36 +1,20 @@
 # -*- coding: utf-8 -*-
 
-import enum
 import time
 from typing import List, Optional, Union
 
 from . import logger
 from .utils import delay
 from ._client import HmClient
-from .exception import ElementNotFoundError
+from .exception import ElementNotFoundError, InvokeHypiumError
+from .match import (
+    MatchPattern,
+    is_selector_key,
+    on_args,
+    resolve_on_call,
+    FALLBACK_ON_ALTERNATE_NAME,
+)
 from .proto import ComponentData, ByData, HypiumResponse, Point, Bounds, ElementInfo
-
-
-class ByType(enum.Enum):
-    id = "id"
-    key = "key"
-    text = "text"
-    type = "type"
-    description = "description"
-    clickable = "clickable"
-    longClickable = "longClickable"
-    scrollable = "scrollable"
-    enabled = "enabled"
-    focused = "focused"
-    selected = "selected"
-    checked = "checked"
-    checkable = "checkable"
-    isBefore = "isBefore"
-    isAfter = "isAfter"
-
-    @classmethod
-    def verify(cls, value):
-        return any(value == item.value for item in cls)
 
 
 class UiObject:
@@ -58,8 +42,45 @@ class UiObject:
 
     def __verify(self):
         for k, v in self._kwargs.items():
-            if not ByType.verify(k):
-                raise ReferenceError(f"{k} is not allowed.")
+            if not is_selector_key(k):
+                raise ReferenceError(
+                    f"{k} is not a supported selector. "
+                    f"See hmdriver2.match.RESOLVED_SELECTOR_KEY for uiautomator2-style textContains, textMatches, …"
+                )
+        if "id" in self._kwargs and "resourceId" in self._kwargs:
+            raise ReferenceError("use only one of `id` and `resourceId`")
+        if "type" in self._kwargs and "className" in self._kwargs:
+            raise ReferenceError("use only one of `type` and `className`")
+
+    def _invoke_on(self, on_name: str, value, pattern: Optional[MatchPattern]) -> str:
+        last_err: Optional[Exception] = None
+        arg_lists: List[list] = [on_args(value, pattern)]
+        if pattern is not None:
+            arg_lists.append([value, str(pattern.name)])
+            arg_lists.append([value, pattern.name.lower()])
+        for args in arg_lists:
+            try:
+                resp: HypiumResponse = self._client.invoke(
+                    f"On.{on_name}", this="On#seed", args=args
+                )
+                return resp.result
+            except InvokeHypiumError as e:
+                last_err = e
+                logger.debug("On.%s%r: %s", on_name, args, e)
+        if pattern is not None:
+            alt = FALLBACK_ON_ALTERNATE_NAME.get((on_name, int(pattern)))
+            if alt:
+                try:
+                    r = self._client.invoke(
+                        f"On.{alt}", this="On#seed", args=[value]
+                    )
+                    return r.result
+                except InvokeHypiumError as e:
+                    last_err = e
+                    logger.debug("On.%s([%r]): %s", alt, value, e)
+        if last_err:
+            raise last_err
+        raise RuntimeError(f"On.{on_name} failed")
 
     @property
     def count(self) -> int:
@@ -162,18 +183,22 @@ class UiObject:
 
     def __get_by(self) -> ByData:
         for k, v in self._kwargs.items():
-            api = f"On.{k}"
-            this = "On#seed"
-            resp: HypiumResponse = self._client.invoke(api, this, args=[v])
-            this = resp.result
+            on_name, pat = resolve_on_call(k)
+            this = self._invoke_on(on_name, v, pat)
 
         if self._isBefore:
-            resp: HypiumResponse = self._client.invoke("On.isBefore", this="On#seed", args=[resp.result])
+            resp: HypiumResponse = self._client.invoke(
+                "On.isBefore", this="On#seed", args=[this]
+            )
+            this = resp.result
 
         if self._isAfter:
-            resp: HypiumResponse = self._client.invoke("On.isAfter", this="On#seed", args=[resp.result])
+            resp: HypiumResponse = self._client.invoke(
+                "On.isAfter", this="On#seed", args=[this]
+            )
+            this = resp.result
 
-        return ByData(resp.result)
+        return ByData(this)
 
     def __operate(self, api, args=[], retries: int = 2):
         if not self._component:
