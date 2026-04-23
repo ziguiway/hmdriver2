@@ -42,14 +42,16 @@
   - 屏幕录屏
   - 手势操作（点击，滑动，输入，复杂手势）
 - 支持控件操作
-  - 控件查找（联合查找，模糊查找，相对查找，xpath查找）
+  - 控件查找（联合查找，**子串/正则/模糊** matching `uiautomator2`，相对查找，xpath）
+  - 等待出现 / 等待消失（`wait` / `wait_gone`，与 u2 习惯接近）
+  - 列表/滚动容器内 **scroll**（纵横向滚动、`scroll.to` 等，Hypium 优先、bounds 内滑动手势兜底）
   - 控件信息获取
   - 控件点击，长按，拖拽，缩放
   - 文本输入，清除
   - 获取控件树
 - 支持Toast获取
+- 纯 Python **后台 Watcher**（`d.watcher`：多规则轮询、自动点击 / 返回等，不依赖新协议）
 - UI Inspector
-- [TODO] 全场景弹窗处理
 - [TODO] 操作标记
 
 
@@ -92,8 +94,11 @@ print(d.device_info)
 
 d.start_app("com.kuaishou.hmapp")
 d(text="精选").click()
+d(textContains="同意").click_if_exists()  # 子串匹配，见「模糊子串与正则选择器」
+d.watcher("ad").when_xpath('//*[@text="跳过"]').click()
+d.watcher.start(interval=0.3)
 d.swipe(0.5, 0.8, 0.5, 0.4)
-...
+# d.watcher.stop()
 ```
 
 # UI inspector
@@ -158,16 +163,21 @@ unset HDC_SERVER_PORT
       - [复杂手势](#复杂手势)
   - [控件操作](#控件操作)
     - [常规选择器](#常规选择器)
-      - [控件查找](#控件查找)
-      - [控件信息](#控件信息)
-      - [控件数量](#控件数量)
-      - [控件点击](#控件点击)
-      - [控件双击](#控件双击)
-      - [控件长按](#控件长按)
-      - [控件拖拽](#控件拖拽)
-      - [控件缩放](#控件缩放)
-      - [控件输入](#控件输入)
-      - [文本清除](#文本清除)
+    - [模糊子串与正则选择器](#模糊子串与正则选择器)
+      - [MatchPattern 枚举](#matchpattern-枚举)
+    - [控件查找](#控件查找)
+    - [等待出现与等待消失](#等待出现与等待消失)
+    - [控件信息](#控件信息)
+    - [控件数量](#控件数量)
+    - [控件点击](#控件点击)
+    - [控件双击](#控件双击)
+    - [控件长按](#控件长按)
+    - [控件拖拽](#控件拖拽)
+    - [控件缩放](#控件缩放)
+    - [控件输入](#控件输入)
+    - [文本清除](#文本清除)
+    - [可滚动列表 scroll](#可滚动列表-scroll)
+    - [后台 Watcher](#后台-watcher)
     - [XPath选择器](#xpath选择器)
       - [xpath控件是否存在](#xpath控件是否存在)
       - [xpath控件点击](#xpath控件点击)
@@ -554,7 +564,7 @@ d.input_text("adbcdfg")
 - `isBefore`
 - `isAfter`
 
-Notes: 获取控件属性值可以配合 [UI inspector](https://github.com/codematrixer/ui-viewer) 工具查看
+Notes: 获取控件属性值可以配合 [UI inspector](https://github.com/codematrixer/ui-viewer) 工具查看。子串、正则、类名/资源 id 的模糊匹配见下节 [模糊子串与正则选择器](#模糊子串与正则选择器)。
 
 **普通定位**
 ```python
@@ -566,8 +576,6 @@ d(id="drag")
 d(type="Button", index=0)
 ```
 Notes：当同一界面有多个属性相同的元素时，`index`属性非常实用
-
-**模糊定位TODO**
 
 **组合定位**
 
@@ -586,6 +594,34 @@ d(text="showToast", isAfter=True)
 d(id="drag", isBefore=True)
 ``` 
 
+### 模糊子串与正则选择器
+
+在精确 `text` / `type` / `description` / `id` 等之外，可单独使用与 [uiautomator2](https://github.com/openatx/uiautomator2) 相近的 **Contains / Matches / 别名** 关键字。底层会优先调用 `On.xxx(value, MatchPattern)` 风格的两参数接口；若当前设备 uitest 版本不支持，会依次尝试字符串型 pattern、以及备用的**单参** `On` 方法名（如 `On.textContains` 等，见源码 `hmdriver2/match.py` 中 `FALLBACK_ON_ALTERNATE_NAME`）。
+
+| 能力 | 示例参数名 |
+|------|------------|
+| 文本子串、前缀、后缀、正则 | `textContains`，`textStartsWith`，`textEndsWith`，`textMatches` |
+| 描述 | `descriptionContains`…`descriptionMatches` 等 |
+| 类名/组件类型 | `className`（同 `type` 精确）, `classNameContains`, `classNameMatches`；`typeContains`, `typeMatches` |
+| 资源 id / key | `resourceId`（同 `id` 精确）, `resourceIdContains`, `resourceIdMatches`；`idContains`/`idMatches`；`keyContains`/`keyMatches` |
+
+`textMatches` 等**正则**参数传入**字符串**（如 `d(textMatches="^ok\\d+$")`）。不要同时传冲突组合（如 `id` 与 `resourceId` 同现、`type` 与 `className` 同现）——会 `ReferenceError`。
+
+**示例**
+
+```python
+from hmdriver2 import MatchPattern  # 需要引用枚举时（一般不必手写）
+
+d(textContains="登").click()
+d(textMatches=r"^\d+条$").click()
+d(resourceIdContains="entry", type="Button").click()
+d(classNameMatches="Text|Button", textContains="提").click()
+```
+
+#### MatchPattern 枚举
+
+定义见 `hmdriver2.match.MatchPattern`（同包可 `from hmdriver2 import MatchPattern`）。常见取值：`EQUALS`，`CONTAINS`，`STARTS_WITH`，`ENDS_WITH`，`REGEX` 等。若你设备上 Hypium 实际枚举与文档不一致，可在本仓库 `match.py` 中按真机调一次 `invoke` 后对齐，或只依赖上述关键字而不用显式 `MatchPattern`。
+
 #### 控件查找
 结合上面讲的控件选择器，就可以进行元素的查找
 ```python
@@ -597,6 +633,21 @@ d(text="tab_recrod", isAfter=True).exists()
 
 d(text="tab_recrod").find_component()
 # 当没找到返回None
+```
+
+#### 等待出现与等待消失
+
+与 uiautomator2 的 `wait` / `wait_gone` 类似：**超时时间单位为秒**，返回 `bool`。未传 `timeout` 时默认 **20 秒**（`UiObject.DEFAULT_WAIT_TIMEOUT`）。
+
+- `wait(timeout=20.0)`：在超时前若当前选择器能匹配到控件则返回 `True`（并缓存 `Component` 供后续点击等），否则 `False`。
+- `wait_gone(timeout=20.0)`：在超时前若**不再**匹配到（含从未出现）则 `True`；若超时仍存在则 `False`。
+
+```python
+if d(text="加载完成").wait(timeout=10.0):
+    d(text="进入首页").click()
+
+# 等蒙层/弹窗消失（请用能唯一描述该层的选择条件）
+d(type="Dialog").wait_gone(timeout=15.0)
 ```
 
 #### 控件信息
@@ -718,6 +769,45 @@ d(text="tab_recrod").input_text("abc")
 ```python
 d(text="tab_recrod").clear_text()
 ```
+
+#### 可滚动列表 scroll
+
+在**可滚动容器**的 `UiObject` 上通过 `.scroll` 使用，风格接近 uiautomator2 的 `scroll`：
+
+- 轴向：`scroll.vert` / `scroll.horiz` 的 `forward` / `backward`（`steps`, `speed`, `extent` 可调）、`fling`（快滑）。
+- 导航：`toBeginning` / `toEnd` 滚到顶/底；`to(max_swipes=20, **选择器)` 在容器内**向下**查找直到子项可匹配或次数用尽，返回 `bool`。
+- 实现：优先设备侧 `Component.scroll*` 等；若无对应 API，则在**控件 `bounds` 内**用 `Driver.swipe` 模拟滑动。
+
+```python
+lst = d(type="List", scrollable=True)   # 先能唯一定位到该列表容器
+if lst.scroll.to(text="某一行文案", type="ListItem", max_swipes=25):
+    d(text="某一行文案", type="ListItem").click()
+
+lst.scroll.vert.forward(steps=2, speed=2200)
+lst.scroll.toBeginning()
+lst.scroll.horiz.fling(speed=5000)
+```
+
+#### 后台 Watcher
+
+不增加设备协议，在 **PC 端**用守护线程**轮询**已注册规则：匹配则执行 `click` / `press_back` / 自定义回调。与主流程共享同一 `Driver` 连接；底层已通过 `HmClient` 的 **I/O 锁**串行化，避免多线程与 Hypium  socket 交错。规则按注册顺序、每轮**先命中先执行**一条。典型用途：主脚本跑用例时顺带关掉权限弹窗、营销页「跳过」等。
+
+```python
+d.watcher("ok").when(text="确定").click()
+d.watcher("skip").when_xpath('//Button[@text="跳过"]').click()
+d.watcher("b").when(text="暂无").press_back()
+d.watcher("c").when(type="Text").do(lambda dr: dr.go_back())
+
+d.watcher.start(interval=0.3)   # 轮询间隔，秒
+# ... 主流程 d.start_app / d(text=...).click() ...
+d.watcher.stop()
+d.watcher.remove("ok")
+d.watcher.clear()               # 移除全部规则
+```
+
+同名 `d.watcher("x")` 后注册会**覆盖**同名字规则。`when(...)` 与 u2 一样，参数与 `d(...)` 一致；`when_xpath` 使用 `d.xpath` 的 XML 与 [XPath选择器](#xpath选择器) 同套逻辑。
+
+**说明**：这是**轮询式**与 u2 在 Android 上基于 UiAutomator 的 watcher 有延迟和负载差异，适合弹窗/提示类；与设备事件型的 `d.toast_watcher` 用途不同。
 
 ### XPath选择器
 xpath选择器基于标准的xpath规范，也可以使用`//*[@属性="属性值"]`的样式（xpath lite）
