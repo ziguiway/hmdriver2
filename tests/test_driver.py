@@ -264,3 +264,18 @@ def test_xpath(d):
     assert toast == "testMessage"
 
     d.xpath(xpath2).click()
+
+
+def test_xpath_wait(d):
+    d.force_start_app("com.samples.test.uitest", "EntryAbility")
+    xpath1 = "//root[1]/Row[1]/Column[1]/Row[1]/Button[3]"  # showToast
+    el = d.xpath(xpath1)
+    assert el.wait(timeout=5.0) is True
+    d.toast_watcher.start()
+    el.click()
+    assert d.toast_watcher.get_toast() == "testMessage"
+
+    no_match = '//*[@text="__missing_text_xpath_wait__"]'
+    assert d.xpath(no_match).wait(timeout=0.3) is False
+    assert d.xpath(no_match).wait_gone(timeout=0.2) is True
+    assert d.xpath(xpath1).wait_gone(timeout=0.2) is False

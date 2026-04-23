@@ -501,6 +501,8 @@ class Driver:
     def xpath(self):
         """
         d.xpath("//*[@text='Hello']").click()
+        d.xpath("//*[@text='Hello']").wait(timeout=15)
+        d.xpath("//*[@text='Hello']").wait_gone(timeout=5)
         """
         from ._xpath import _XPath
         return _XPath(self)

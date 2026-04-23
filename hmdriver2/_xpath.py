@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 
 import re
-from typing import Dict
+import time
+from typing import Dict, Optional
+
 from lxml import etree
 from functools import cached_property
 
@@ -11,14 +13,22 @@ from .driver import Driver
 from .utils import delay, parse_bounds
 from .exception import XmlElementNotFoundError
 
+# Same defaults as UiObject.wait / wait_gone
+_DEFAULT_XPATH_WAIT_TIMEOUT = 20.0
+_WAIT_POLL_INTERVAL = 0.1
+
 
 class _XPath:
     def __init__(self, d: Driver):
         self._d = d
 
-    def __call__(self, xpath: str) -> '_XMLElement':
+    def __call__(self, xpath: str) -> "_XMLElement":
+        return _XPath._resolve(self._d, xpath)
 
-        hierarchy: Dict = self._d.dump_hierarchy()
+    @staticmethod
+    def _resolve(d: Driver, xpath: str) -> "_XMLElement":
+        """Evaluate *xpath* against the current view hierarchy; returns a bound _XMLElement."""
+        hierarchy: Dict = d.dump_hierarchy()
         if not hierarchy:
             raise RuntimeError("hierarchy is empty")
 
@@ -30,11 +40,11 @@ class _XPath:
             raw_bounds: str = node.attrib.get("bounds")  # [832,1282][1125,1412]
             bounds: Bounds = parse_bounds(raw_bounds)
             logger.debug(f"{xpath} Bounds: {bounds}")
-            _xe = _XMLElement(bounds, self._d)
+            _xe = _XMLElement(bounds, d, xpath)
             setattr(_xe, "attrib_info", node.attrib)
             return _xe
 
-        return _XMLElement(None, self._d)
+        return _XMLElement(None, d, xpath)
 
     @staticmethod
     def _sanitize_text(text: str) -> str:
@@ -60,9 +70,57 @@ class _XPath:
 
 
 class _XMLElement:
-    def __init__(self, bounds: Bounds, d: Driver):
+    def __init__(self, bounds: Optional[Bounds], d: Driver, xpath: str) -> None:
         self.bounds = bounds
         self._d = d
+        self._xpath = xpath
+
+    def _invalidate_center_cache(self) -> None:
+        self.__dict__.pop("center", None)
+
+    def _merge_state_from(self, el: "_XMLElement") -> None:
+        self.bounds = el.bounds
+        if hasattr(el, "attrib_info"):
+            self.attrib_info = el.attrib_info
+        else:
+            self.__dict__.pop("attrib_info", None)
+        self._invalidate_center_cache()
+
+    def wait(self, timeout: Optional[float] = None) -> bool:
+        """
+        Re-query the hierarchy until this xpath matches an element, or the timeout elapses.
+        If found, this object's bounds (and :attr:`attrib_info` if present) are updated so
+        a subsequent :meth:`click` reuses the resolved node.
+
+        Same timeout semantics as :meth:`hmdriver2._uiobject.UiObject.wait` (seconds, default 20).
+        """
+        if timeout is None:
+            timeout = _DEFAULT_XPATH_WAIT_TIMEOUT
+        deadline = time.time() + max(0.0, float(timeout))
+        while True:
+            el = _XPath._resolve(self._d, self._xpath)
+            if el.exists():
+                self._merge_state_from(el)
+                return True
+            if time.time() >= deadline:
+                return False
+            time.sleep(_WAIT_POLL_INTERVAL)
+
+    def wait_gone(self, timeout: Optional[float] = None) -> bool:
+        """
+        Re-query until the xpath no longer matches, or the timeout elapses.
+        If the node is already absent, returns True immediately.
+        """
+        if timeout is None:
+            timeout = _DEFAULT_XPATH_WAIT_TIMEOUT
+        deadline = time.time() + max(0.0, float(timeout))
+        while True:
+            el = _XPath._resolve(self._d, self._xpath)
+            if not el.exists():
+                return True
+            if time.time() >= deadline:
+                return False
+            time.sleep(_WAIT_POLL_INTERVAL)
 
     def _verify(self):
         if not self.bounds:
