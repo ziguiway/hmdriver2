@@ -43,7 +43,7 @@
   - 手势操作（点击，滑动，输入，复杂手势）
 - 支持控件操作
   - 控件查找（联合查找，**子串/正则/模糊** matching `uiautomator2`，相对查找，xpath）
-  - 等待出现 / 等待消失（`wait` / `wait_gone`，与 u2 习惯接近）
+  - 等待出现 / 等待消失（`wait` / `wait_gone`，与 u2 习惯接近；`d(...)` 与 `d.xpath(...)` 均支持）
   - 列表/滚动容器内 **scroll**（纵横向滚动、`scroll.to` 等，Hypium 优先、bounds 内滑动手势兜底）
   - 控件信息获取
   - 控件点击，长按，拖拽，缩放
@@ -180,6 +180,7 @@ unset HDC_SERVER_PORT
     - [后台 Watcher](#后台-watcher)
     - [XPath选择器](#xpath选择器)
       - [xpath控件是否存在](#xpath控件是否存在)
+      - [xpath 等待出现与等待消失](#xpath-等待出现与等待消失)
       - [xpath控件点击](#xpath控件点击)
       - [xpath控件双击](#xpath控件双击)
       - [xpath控件长按](#xpath控件长按)
@@ -352,10 +353,14 @@ d.set_display_rotation(DisplayRotation.ROTATION_180)
 ### Home
 ```python
 d.go_home()
+# 或（与 uiautomator2 式命名一致）
+d.press_home()
 ```
 ### 返回
 ```python
 d.go_back()
+# 或
+d.press_back()
 ```
 ### 亮屏
 ```python
@@ -373,12 +378,35 @@ d.unlock()
 ```
 
 ### Key Events
+
+**常用键**：无需手写枚举时可直接调 `Driver` 的封装方法（实际均为向设备发送 [KeyCode](https://github.com/codematrixer/hmdriver2/blob/master/hmdriver2/proto.py) 的快捷方式，仍走 HDC `uitest uiInput keyEvent` 与现有一致）：
+
+| 方法 | 说明 |
+| --- | --- |
+| `d.press_back()` / `d.press_home()` | 同 `go_back()` / `go_home()` |
+| `d.press_power()` | 电源键 |
+| `d.press_menu()` | 菜单键 |
+| `d.press_enter()` | 回车 |
+| `d.press_backspace()` | 退格（`DEL`） |
+| `d.press_delete()` | 向前删除（`FORWARD_DEL`） |
+| `d.volume_up()` / `d.volume_down()` / `d.volume_mute()` | 音量 + / - / 静音 |
+| `d.press_tab()` / `d.press_space()` / `d.press_escape()` | Tab、空格、Esc |
+| `d.page_up()` / `d.page_down()` | 翻页 |
+| `d.press_dpad_up()` … `d.press_dpad_center()` | 方向键与中心确认 |
+| `d.press_multitask()` | 多任务/最近任务（`VIRTUAL_MULTITASK`） |
+| `d.press_search()` | 查找（`FIND`） |
+| `d.press_brightness_up()` / `d.press_brightness_down()` | 亮度调节键 |
+
+**任意码**：其他按键仍用 `press_key`：
+
 ```python
 from hmdriver2.proto import KeyCode
 
 d.press_key(KeyCode.POWER)
+d.press_key(2017)  # 需要时也可传整数码
 ```
-详细的Key code请参考 [harmony key code](https://github.com/codematrixer/hmdriver2/blob/4d7bceaded947bd63d737de180064679ad4c77b8/hmdriver2/proto.py#L133)
+
+完整键值表见 [proto.py 中 KeyCode 枚举](https://github.com/codematrixer/hmdriver2/blob/master/hmdriver2/proto.py)。
 
 
 ### 执行 HDC 命令

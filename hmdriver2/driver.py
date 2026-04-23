@@ -277,6 +277,110 @@ class Driver:
     def press_key(self, key_code: Union[KeyCode, int]):
         self.hdc.send_key(key_code)
 
+    # -------------------------------------------------------------------------
+    # Common key shortcuts (OpenHarmony :class:`~hmdriver2.proto.KeyCode` values
+    # sent via HDC; arbitrary codes still use :meth:`press_key`.)
+    # -------------------------------------------------------------------------
+
+    def press_back(self) -> None:
+        """Send BACK (same as :meth:`go_back`)."""
+        self.go_back()
+
+    def press_home(self) -> None:
+        """Send HOME (same as :meth:`go_home`)."""
+        self.go_home()
+
+    @delay
+    def press_power(self) -> None:
+        self.hdc.send_key(KeyCode.POWER)
+
+    @delay
+    def press_menu(self) -> None:
+        self.hdc.send_key(KeyCode.MENU)
+
+    @delay
+    def press_enter(self) -> None:
+        self.hdc.send_key(KeyCode.ENTER)
+
+    @delay
+    def press_backspace(self) -> None:
+        """退格 (``KeyCode.DEL``)。"""
+        self.hdc.send_key(KeyCode.DEL)
+
+    @delay
+    def press_delete(self) -> None:
+        """向前删除 (``KeyCode.FORWARD_DEL``)。"""
+        self.hdc.send_key(KeyCode.FORWARD_DEL)
+
+    @delay
+    def volume_up(self) -> None:
+        self.hdc.send_key(KeyCode.VOLUME_UP)
+
+    @delay
+    def volume_down(self) -> None:
+        self.hdc.send_key(KeyCode.VOLUME_DOWN)
+
+    @delay
+    def volume_mute(self) -> None:
+        self.hdc.send_key(KeyCode.VOLUME_MUTE)
+
+    @delay
+    def press_tab(self) -> None:
+        self.hdc.send_key(KeyCode.TAB)
+
+    @delay
+    def press_space(self) -> None:
+        self.hdc.send_key(KeyCode.SPACE)
+
+    @delay
+    def press_escape(self) -> None:
+        self.hdc.send_key(KeyCode.ESCAPE)
+
+    @delay
+    def page_up(self) -> None:
+        self.hdc.send_key(KeyCode.PAGE_UP)
+
+    @delay
+    def page_down(self) -> None:
+        self.hdc.send_key(KeyCode.PAGE_DOWN)
+
+    @delay
+    def press_dpad_up(self) -> None:
+        self.hdc.send_key(KeyCode.DPAD_UP)
+
+    @delay
+    def press_dpad_down(self) -> None:
+        self.hdc.send_key(KeyCode.DPAD_DOWN)
+
+    @delay
+    def press_dpad_left(self) -> None:
+        self.hdc.send_key(KeyCode.DPAD_LEFT)
+
+    @delay
+    def press_dpad_right(self) -> None:
+        self.hdc.send_key(KeyCode.DPAD_RIGHT)
+
+    @delay
+    def press_dpad_center(self) -> None:
+        self.hdc.send_key(KeyCode.DPAD_CENTER)
+
+    @delay
+    def press_multitask(self) -> None:
+        """虚拟多任务 / 最近任务 (``VIRTUAL_MULTITASK``)。"""
+        self.hdc.send_key(KeyCode.VIRTUAL_MULTITASK)
+
+    @delay
+    def press_search(self) -> None:
+        self.hdc.send_key(KeyCode.FIND)
+
+    @delay
+    def press_brightness_up(self) -> None:
+        self.hdc.send_key(KeyCode.BRIGHTNESS_UP)
+
+    @delay
+    def press_brightness_down(self) -> None:
+        self.hdc.send_key(KeyCode.BRIGHTNESS_DOWN)
+
     def screen_on(self):
         self.hdc.wakeup()
 
