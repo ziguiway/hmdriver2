@@ -76,6 +76,16 @@ class Driver:
         if hasattr(self, '_client') and self._client:
             self._client.release()
 
+    def close(self) -> None:
+        """
+        Close the Hypium connection and HDC port forward. Idempotent; call at
+        the end of a script (e.g. in ``finally``) so cleanup runs before
+        interpreter shutdown. :meth:`release` on the client still skips
+        ``fport rm`` if :func:`sys.is_finalizing` is true.
+        """
+        if hasattr(self, "_client") and self._client is not None:
+            self._client.release()
+
     def _init_hmclient(self):
         self._client.start()
 

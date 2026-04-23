@@ -3,6 +3,7 @@ import socket
 import json
 import time
 import os
+import sys
 import hashlib
 import threading
 import typing
@@ -27,6 +28,7 @@ class HmClient:
         self.sock = None
         # Serialize all Hypium socket traffic (main thread vs background watcher, etc.)
         self._io_lock = threading.RLock()
+        self._released = False
 
     @cached_property
     def local_port(self):
@@ -152,14 +154,36 @@ class HmClient:
         self._create_hdriver()
 
     def release(self):
+        """
+        Close the socket and remove the local HDC port forward.
+
+        Idempotent: safe to call from :meth:`Driver.__del__` after an explicit
+        call. When the interpreter is shutting down (``sys.is_finalizing()``),
+        only the socket is closed—``hdc fport rm`` is skipped to avoid
+        ``subprocess`` during finalization (see ``can't create new thread at
+        interpreter shutdown`` on some Python builds).
+        """
+        if self._released:
+            return
+        self._released = True
+
         logger.info(f"Release {self.__class__.__name__} connection")
+
+        if getattr(sys, "is_finalizing", lambda: False)():
+            try:
+                if self.sock is not None:
+                    self.sock.close()
+            except OSError:
+                pass
+            self.sock = None
+            logger.debug("release: interpreter finalizing, skipped fport rm")
+            return
+
         try:
-            if self.sock:
+            if self.sock is not None:
                 self.sock.close()
-                self.sock = None
-
+            self.sock = None
             self._rm_local_port()
-
         except Exception as e:
             logger.error(f"An error occurred: {e}")
 
