@@ -25,6 +25,16 @@ def test_by_combine(d):
     assert not d(type="Button", index=5).exists()
 
 
+def test_wait(d):
+    assert d(type="Button", text="showToast").wait(timeout=5.0) is True
+    assert d(type="Button", text="no_such_button_xyz").wait(timeout=0.5) is False
+
+
+def test_wait_gone(d):
+    assert d(type="Button", text="no_such_button_xyz").wait_gone(timeout=0.2) is True
+    assert d(type="Button", text="showToast").wait_gone(timeout=0.2) is False
+
+
 def test_isBefore_isAfter(d):
     assert d(text="showToast", isAfter=True).text == "showDialog"
     # assert d(id="drag", isBefore=True).text == "showDialog"

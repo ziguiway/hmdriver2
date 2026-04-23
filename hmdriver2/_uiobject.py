@@ -2,7 +2,7 @@
 
 import enum
 import time
-from typing import List, Union
+from typing import List, Optional, Union
 
 from . import logger
 from .utils import delay
@@ -34,7 +34,11 @@ class ByType(enum.Enum):
 
 
 class UiObject:
+    # exists(retries, wait_time) fallbacks; see method docstring
     DEFAULT_TIMEOUT = 2
+    # uiautomator2: wait / wait_gone default, seconds
+    DEFAULT_WAIT_TIMEOUT = 20.0
+    _WAIT_POLL_INTERVAL = 0.1
 
     def __init__(self, client: HmClient, **kwargs) -> None:
         self._client = client
@@ -68,6 +72,54 @@ class UiObject:
     def exists(self, retries: int = 2, wait_time=1) -> bool:
         obj = self.find_component(retries, wait_time)
         return True if obj else False
+
+    def wait(self, timeout: Optional[float] = None) -> bool:
+        """
+        Block until a component matching this selector (and :attr:`index`) is found, or the timeout elapses.
+
+        Semantics are similar to uiautomator2's ``UiObject.wait()`` (timeout in **seconds**, returns ``bool``).
+
+        Args:
+            timeout: Maximum time to wait in seconds. Defaults to :data:`DEFAULT_WAIT_TIMEOUT`.
+
+        Returns:
+            True if a matching component appeared in time, False otherwise.
+        """
+        if timeout is None:
+            timeout = self.DEFAULT_WAIT_TIMEOUT
+        deadline = time.time() + max(0.0, timeout)
+        while True:
+            components = self.__find_components()
+            if components and self._index < len(components):
+                self.__set_component(components[self._index])
+                return True
+            if time.time() >= deadline:
+                return False
+            time.sleep(self._WAIT_POLL_INTERVAL)
+
+    def wait_gone(self, timeout: Optional[float] = None) -> bool:
+        """
+        Block until this selector no longer matches (at least ``index + 1`` results), or the timeout elapses.
+
+        Similar to uiautomator2's ``UiObject.wait_gone()``. If the target is already absent, returns True
+        immediately.
+
+        Args:
+            timeout: Maximum time to wait in seconds. Defaults to :data:`DEFAULT_WAIT_TIMEOUT`.
+
+        Returns:
+            True if the element became absent (or was never present) before timeout, False if it is still
+            there when the wait ends.
+        """
+        if timeout is None:
+            timeout = self.DEFAULT_WAIT_TIMEOUT
+        deadline = time.time() + max(0.0, timeout)
+        while True:
+            if not self.exists(retries=1, wait_time=0):
+                return True
+            if time.time() >= deadline:
+                return False
+            time.sleep(self._WAIT_POLL_INTERVAL)
 
     def __set_component(self, component: ComponentData):
         self._component = component
