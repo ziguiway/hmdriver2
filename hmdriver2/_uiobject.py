@@ -156,6 +156,10 @@ class UiObject:
 
         return components
 
+    def _by_data(self) -> ByData:
+        """Build the Hypium ``On``/``By`` handle for this selector (for e.g. :attr:`scroll`)."""
+        return self.__get_by()
+
     def __get_by(self) -> ByData:
         for k, v in self._kwargs.items():
             api = f"On.{k}"
@@ -178,6 +182,12 @@ class UiObject:
 
         resp: HypiumResponse = self._client.invoke(api, this=self._component.value, args=args)
         return resp.result
+
+    @property
+    def scroll(self):
+        """uiautomator2-style list scroller: ``.vert`` / ``.horiz`` / ``.to`` / ``.toBeginning`` / ``.toEnd``."""
+        from ._scrollable import UiScroll
+        return UiScroll(self)
 
     @property
     def id(self) -> str:
