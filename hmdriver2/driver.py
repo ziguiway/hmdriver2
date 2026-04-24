@@ -731,17 +731,25 @@ class Driver:
         if dev_w <= 0 or dev_h <= 0:
             raise RuntimeError("Cannot get device display size")
 
-        # Calculate scaling factors
-        scale_x = dev_w / float(img_w)
-        scale_y = dev_h / float(img_h)
-        
-        # Apply scaling
-        dx = int(round(x * scale_x))
-        dy = int(round(y * scale_y))
-        
-        # Clamp to device bounds
-        dx = max(0, min(dx, dev_w - 1))
-        dy = max(0, min(dy, dev_h - 1))
+        # Check if screenshot size matches device resolution
+        # If they match, use coordinates directly without scaling
+        if abs(img_w - dev_w) <= 1 and abs(img_h - dev_h) <= 1:
+            # Screenshot matches device resolution, use coordinates directly
+            dx = max(0, min(int(x), dev_w - 1))
+            dy = max(0, min(int(y), dev_h - 1))
+            scale_x = scale_y = 1.0
+        else:
+            # Calculate scaling factors
+            scale_x = dev_w / float(img_w)
+            scale_y = dev_h / float(img_h)
+            
+            # Apply scaling
+            dx = int(round(x * scale_x))
+            dy = int(round(y * scale_y))
+            
+            # Clamp to device bounds
+            dx = max(0, min(dx, dev_w - 1))
+            dy = max(0, min(dy, dev_h - 1))
 
         logger.debug(
             f"click_from_screenshot: screenshot={img_w}x{img_h}, "
@@ -757,7 +765,7 @@ class Driver:
         template_path: str,
         threshold: float = 0.85,
         grayscale: bool = True,
-        method: str = "screenCap",
+        method: str = "snapshot_display",
         return_result: bool = False,
         draw_box: bool = True,
         # Multi-scale matching parameters for resolution adaptation
@@ -850,7 +858,7 @@ class Driver:
         rgb: Tuple[int, int, int],
         tolerance: int = 10,
         region: Optional[Tuple[int, int, int, int]] = None,
-        method: str = "screenCap",
+        method: str = "snapshot_display",
         return_result: bool = False,
     ) -> Union[bool, Tuple[bool, Optional[Tuple[int, int]]]]:
         """
