@@ -759,6 +759,7 @@ class Driver:
         grayscale: bool = True,
         method: str = "screenCap",
         return_result: bool = False,
+        draw_box: bool = True,
     ) -> Union[bool, Tuple[bool, Optional["MatchResult"]]]:
         """
         Screenshot -> template match -> click (OpenCV).
@@ -769,12 +770,13 @@ class Driver:
             grayscale: Whether to use grayscale matching (faster)
             method: Screenshot method ("screenCap" or "snapshot_display")
             return_result: Whether to return the match result
+            draw_box: Whether to draw a bounding box on the screenshot
             
         Returns:
             bool: True if found and clicked, False otherwise
             Or tuple (bool, MatchResult) if return_result=True
         """
-        from ._vision import find_image, MatchResult
+        from ._vision import find_image, MatchResult, _require_cv2
 
         shot = self._temp_screenshot(method=method)
         try:
@@ -792,6 +794,27 @@ class Driver:
             f"Image found: {template_path}, score={r.score:.4f}, "
             f"position=({r.x},{r.y}), size=({r.w}x{r.h}), center=({cx},{cy})"
         )
+        
+        # Draw bounding box on screenshot
+        if draw_box:
+            try:
+                cv2 = _require_cv2()
+                # Read the screenshot
+                img = cv2.imread(shot)
+                if img is not None:
+                    # Draw rectangle (green color, 2px thickness)
+                    cv2.rectangle(img, (r.x, r.y), (r.x + r.w, r.y + r.h), (0, 255, 0), 2)
+                    # Draw center dot (red)
+                    cv2.circle(img, (cx, cy), 5, (0, 0, 255), -1)
+                    # Draw score text
+                    score_text = f"{r.score:.2f}"
+                    cv2.putText(img, score_text, (r.x, r.y - 10), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                    # Save back to the same file
+                    cv2.imwrite(shot, img)
+                    logger.debug(f"Bounding box drawn on screenshot: {shot}")
+            except Exception as e:
+                logger.warning(f"Failed to draw bounding box: {e}")
         
         try:
             clicked_point = self.click_from_screenshot(cx, cy, shot)
