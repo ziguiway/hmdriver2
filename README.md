@@ -224,6 +224,28 @@ d.start_app("com.kuaishou.hmapp", "EntryAbility")
 
 不传`page_name`时，默认会使用main ability作为`page_name`
 
+#### 用软件名 / 显示名启动
+
+当你只知道应用名称（如「微信」「系统设置」），可以用包元数据里解析出的显示名 / `vendor` 等来匹配，再启动：
+
+```python
+# 按子串匹配显示名；匹配不到会抛 AppNameNotFoundError；多个命中会抛 AppNameAmbiguousError
+d.start_app_by_name("系统设置", match="contains", include_system_apps=True)
+
+# 与 force_start_app 一样：先回桌面、强停、再按名启动
+d.force_start_app_by_name("微信")
+
+# 先只解析包名（例如你想打日志 / 重试逻辑）
+pkg = d.find_package_by_display_name("微信", on_ambiguous="first")
+d.start_app(pkg)
+```
+
+**说明**：
+
+- 会遍历本机已安装包列表，并可能对每个包执行 `bm dump -n` 解析元数据，**可能较慢**；同一次 `Driver` 生命周期内会缓存已解析的显示名。
+- `match` 支持：`contains`（默认）、`exact`、`startswith`、`endswith`、`regex`。
+- `include_bundle_name=True`（默认）时，也允许用**包名子串**匹配到 `com.xxx`（例如只填 `kuaishou`）。
+
 ### 停止App
 ```python
 d.stop_app("com.kuaishou.hmapp")
@@ -446,6 +468,35 @@ d.screenshot(path)
 
 ```
 参数`path`表示截图保存在本地电脑的文件路径
+
+### 视觉定位（找图/找色）并点击
+
+需要安装 OpenCV 依赖（可选项）：
+
+```bash
+pip3 install -U "hmdriver2[opencv-python]"
+```
+
+#### 找图点击（模板匹配）
+
+```python
+# template_path 是你保存的“小图标/按钮”模板文件（png/jpg）
+ok = d.click_image(template_path="res/btn_ok.png", threshold=0.88)
+if not ok:
+    print("not found")
+```
+
+#### 找色点击（RGB 容差）
+
+```python
+# 找到第一个接近该颜色的像素并点击（rgb）
+d.click_color((255, 0, 0), tolerance=12)
+
+# 可限制在截图上的一个区域 (x1, y1, x2, y2)（截图像素坐标）
+d.click_color((0, 160, 255), tolerance=10, region=(100, 400, 600, 1200))
+```
+
+以上方法内部流程：先截图到本地临时文件 → 在截图像素坐标系里定位 → 映射到设备 `display_size` 坐标并点击。
 
 ### 屏幕录屏
 方式一

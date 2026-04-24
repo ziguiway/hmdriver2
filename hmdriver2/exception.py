@@ -38,3 +38,19 @@ class InjectGestureError(Exception):
 
 class ScreenRecordError(Exception):
     pass
+
+
+class AppNameNotFoundError(HmDriverError):
+    """No installed app matches the given display / software name."""
+
+
+class AppNameAmbiguousError(HmDriverError):
+    """
+    More than one installed app matches the given name.
+
+    The ``matches`` list contains ``(package_name, display_name)`` tuples.
+    """
+
+    def __init__(self, message: str, matches):
+        super().__init__(message)
+        self.matches = matches

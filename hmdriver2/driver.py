@@ -3,16 +3,66 @@
 import json
 import uuid
 import re
+import tempfile
 from typing import Type, Any, Tuple, Dict, Union, List, Optional
 from functools import cached_property  # python3.8+
 
 from . import logger
-from .utils import delay
+from .utils import delay, image_size
 from ._client import HmClient
 from ._uiobject import UiObject
 from .hdc import list_devices
-from .exception import DeviceNotFoundError
+from .exception import (
+    AppNameAmbiguousError,
+    AppNameNotFoundError,
+    DeviceNotFoundError,
+)
 from .proto import HypiumResponse, KeyCode, Point, DisplayRotation, DeviceInfo, CommandResult
+
+
+def _bundle_label_from_info(info: Optional[dict]) -> str:
+    """
+    Best-effort display / software name from `bm dump -n` JSON.
+    Falls back to vendor, then ``bundleName``.
+    """
+    if not info:
+        return ""
+
+    def _dig(d: Any, *keys: str) -> Any:
+        cur: Any = d
+        for k in keys:
+            if not isinstance(cur, dict):
+                return None
+            cur = cur.get(k)
+        return cur
+
+    for path in (("appInfo", "label"), ("summary", "label"), ("applicationInfo", "label")):
+        v = _dig(info, *path)
+        if isinstance(v, str) and v.strip() and not v.strip().startswith("$"):
+            return v.strip()
+
+    for k in ("label", "name"):
+        v = info.get(k)
+        if isinstance(v, str) and v.strip() and not v.strip().startswith("$"):
+            return v.strip()
+
+    app = info.get("applicationInfo")
+    if isinstance(app, dict):
+        for k in ("label", "name", "nameWithPrefix"):
+            v = app.get(k)
+            if isinstance(v, str) and v.strip() and not v.strip().startswith("$"):
+                return v.strip()
+        v = app.get("vendor")
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+
+    v = info.get("vendor")
+    if isinstance(v, str) and v.strip():
+        return v.strip()
+    b = info.get("bundleName")
+    if isinstance(b, str) and b.strip():
+        return b.strip()
+    return ""
 
 
 class Driver:
@@ -47,6 +97,7 @@ class Driver:
         self.serial = serial
         self._client = HmClient(self.serial)
         self.hdc = self._client.hdc
+        self._bundle_label_cache: Dict[str, str] = {}
         self._init_hmclient()
         self._initialized = True  # Mark the instance as initialized
         del self._serial_for_init  # Clean up temporary attribute
@@ -237,6 +288,157 @@ class Driver:
         abilities.sort(key=lambda x: (not x["isLauncherAbility"], -x["score"]))
         logger.debug(f"main ability: {abilities[0]}")
         return abilities[0]
+
+    def get_app_display_name(self, package_name: str) -> str:
+        """
+        Return the application's display / software name (from bundle metadata), if any.
+        """
+        if package_name in self._bundle_label_cache:
+            return self._bundle_label_cache[package_name]
+        label = _bundle_label_from_info(self.get_app_info(package_name))
+        self._bundle_label_cache[package_name] = label
+        return label
+
+    @staticmethod
+    def _display_name_matched(
+        query: str, text: str, match: str, case_insensitive: bool
+    ) -> bool:
+        if not text:
+            return False
+        t, q = text, query
+        if case_insensitive and match != "regex":
+            t, q = t.casefold(), q.casefold()
+        if match == "exact":
+            return t == q
+        if match == "contains":
+            return q in t
+        if match == "startswith":
+            return t.startswith(q)
+        if match == "endswith":
+            return t.endswith(q)
+        if match == "regex":
+            flags = re.IGNORECASE if case_insensitive else 0
+            return re.search(query, text, flags) is not None
+        raise ValueError(
+            f"match must be 'exact'|'contains'|'startswith'|'endswith'|'regex', got {match!r}"
+        )
+
+    def find_all_packages_by_display_name(
+        self,
+        name: str,
+        *,
+        include_system_apps: bool = False,
+        match: str = "contains",
+        case_insensitive: bool = True,
+        include_bundle_name: bool = True,
+    ) -> List[Tuple[str, str, str]]:
+        """
+        List ``(package_name, display_name, how)`` for installed apps whose display
+        name (and optionally bundle id) matches ``name``.
+
+        ``how`` is ``"label"`` or ``"bundle"`` for debugging.
+        """
+        out: List[Tuple[str, str, str]] = []
+        for pkg in sorted(self.list_apps(include_system_apps)):
+            display = self.get_app_display_name(pkg)
+            if self._display_name_matched(name, display, match, case_insensitive):
+                out.append((pkg, display, "label"))
+                continue
+            if include_bundle_name and self._display_name_matched(
+                name, pkg, match, case_insensitive
+            ):
+                out.append((pkg, display or pkg, "bundle"))
+        return out
+
+    def find_package_by_display_name(
+        self,
+        name: str,
+        *,
+        include_system_apps: bool = False,
+        match: str = "contains",
+        case_insensitive: bool = True,
+        include_bundle_name: bool = True,
+        on_ambiguous: str = "error",
+    ) -> str:
+        """
+        Resolve a single bundle name from an app display / software name.
+
+        This may be slow: it iterates installed packages and may call
+        ``bm dump -n`` for each. Results are cached per :class:`Driver` instance.
+        """
+        if on_ambiguous not in ("error", "first"):
+            raise ValueError("on_ambiguous must be 'error' or 'first'")
+        found = self.find_all_packages_by_display_name(
+            name,
+            include_system_apps=include_system_apps,
+            match=match,
+            case_insensitive=case_insensitive,
+            include_bundle_name=include_bundle_name,
+        )
+        if not found:
+            raise AppNameNotFoundError(f"No app matches name: {name!r}")
+        if len(found) == 1:
+            return found[0][0]
+        if on_ambiguous == "first":
+            return found[0][0]
+        pretty = ", ".join(f"{p} ({d})" for p, d, _ in found)
+        raise AppNameAmbiguousError(
+            f"Multiple apps match {name!r}: {pretty}",
+            matches=[(p, d) for p, d, _ in found],
+        )
+
+    def start_app_by_name(
+        self,
+        app_name: str,
+        page_name: Optional[str] = None,
+        *,
+        include_system_apps: bool = False,
+        match: str = "contains",
+        case_insensitive: bool = True,
+        include_bundle_name: bool = True,
+        on_ambiguous: str = "error",
+    ) -> str:
+        """
+        Start an app by its display / software name (as shown to users, or
+        matching bundle id if ``include_bundle_name`` is true).
+
+        Returns the resolved ``package_name``.
+        """
+        bundle = self.find_package_by_display_name(
+            app_name,
+            include_system_apps=include_system_apps,
+            match=match,
+            case_insensitive=case_insensitive,
+            include_bundle_name=include_bundle_name,
+            on_ambiguous=on_ambiguous,
+        )
+        self.start_app(bundle, page_name)
+        return bundle
+
+    def force_start_app_by_name(
+        self,
+        app_name: str,
+        page_name: Optional[str] = None,
+        *,
+        include_system_apps: bool = False,
+        match: str = "contains",
+        case_insensitive: bool = True,
+        include_bundle_name: bool = True,
+        on_ambiguous: str = "error",
+    ) -> str:
+        """
+        Like :meth:`force_start_app`, but resolve the target by display / software name.
+        """
+        bundle = self.find_package_by_display_name(
+            app_name,
+            include_system_apps=include_system_apps,
+            match=match,
+            case_insensitive=case_insensitive,
+            include_bundle_name=include_bundle_name,
+            on_ambiguous=on_ambiguous,
+        )
+        self.force_start_app(bundle, page_name)
+        return bundle
 
     @cached_property
     def toast_watcher(self):
@@ -490,6 +692,79 @@ class Driver:
             str: The path where the screenshot is saved.
         """
         return self.hdc.screenshot(path, method=method)
+
+    def _temp_screenshot(self, method: str = "snapshot_display") -> str:
+        suffix = ".jpeg" if method == "snapshot_display" else ".png"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as f:
+            path = f.name
+        return self.screenshot(path, method=method)
+
+    @delay
+    def click_from_screenshot(
+        self,
+        x: int,
+        y: int,
+        screenshot_path: str,
+        assume_in_bounds: bool = True,
+    ) -> Point:
+        """
+        Click using pixel coordinates from a screenshot image.
+        """
+        img_w, img_h = image_size(screenshot_path)
+        if img_w <= 0 or img_h <= 0:
+            raise ValueError("invalid screenshot size")
+
+        if assume_in_bounds:
+            x = max(0, min(int(x), img_w - 1))
+            y = max(0, min(int(y), img_h - 1))
+
+        dev_w, dev_h = self.display_size
+        dx = int(round(x * (dev_w / float(img_w))))
+        dy = int(round(y * (dev_h / float(img_h))))
+        dx = max(0, min(dx, dev_w - 1))
+        dy = max(0, min(dy, dev_h - 1))
+
+        self._invoke("Driver.click", args=[dx, dy])
+        return Point(dx, dy)
+
+    def click_image(
+        self,
+        template_path: str,
+        threshold: float = 0.85,
+        grayscale: bool = True,
+        method: str = "snapshot_display",
+    ) -> bool:
+        """
+        Screenshot -> template match -> click (OpenCV).
+        """
+        from ._vision import find_image
+
+        shot = self._temp_screenshot(method=method)
+        r = find_image(shot, template_path, threshold=threshold, grayscale=grayscale)
+        if r is None:
+            return False
+        cx, cy = r.center
+        self.click_from_screenshot(cx, cy, shot)
+        return True
+
+    def click_color(
+        self,
+        rgb: Tuple[int, int, int],
+        tolerance: int = 10,
+        region: Optional[Tuple[int, int, int, int]] = None,
+        method: str = "snapshot_display",
+    ) -> bool:
+        """
+        Screenshot -> find a pixel by color -> click (OpenCV+NumPy).
+        """
+        from ._vision import find_color
+
+        shot = self._temp_screenshot(method=method)
+        pt = find_color(shot, rgb=rgb, tolerance=tolerance, region=region)
+        if pt is None:
+            return False
+        self.click_from_screenshot(pt[0], pt[1], shot)
+        return True
 
     def shell(self, cmd) -> CommandResult:
         return self.hdc.shell(cmd)
