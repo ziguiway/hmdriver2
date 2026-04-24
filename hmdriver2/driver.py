@@ -760,6 +760,11 @@ class Driver:
         method: str = "screenCap",
         return_result: bool = False,
         draw_box: bool = True,
+        # Multi-scale matching parameters for resolution adaptation
+        multi_scale: bool = True,
+        scale_range: Tuple[float, float] = (0.5, 2.0),
+        scale_steps: int = 30,
+        preprocess: bool = True,
     ) -> Union[bool, Tuple[bool, Optional["MatchResult"]]]:
         """
         Screenshot -> template match -> click (OpenCV).
@@ -772,6 +777,12 @@ class Driver:
             return_result: Whether to return the match result
             draw_box: Whether to draw a bounding box on the screenshot
             
+            # Multi-scale matching parameters for resolution adaptation
+            multi_scale: Enable multi-scale matching for resolution adaptation
+            scale_range: (min_scale, max_scale) for multi-scale search
+            scale_steps: Number of scale steps to search
+            preprocess: Whether to apply image preprocessing (normalization/equalization)
+            
         Returns:
             bool: True if found and clicked, False otherwise
             Or tuple (bool, MatchResult) if return_result=True
@@ -780,7 +791,16 @@ class Driver:
 
         shot = self._temp_screenshot(method=method)
         try:
-            r = find_image(shot, template_path, threshold=threshold, grayscale=grayscale)
+            r = find_image(
+                shot,
+                template_path,
+                threshold=threshold,
+                grayscale=grayscale,
+                multi_scale=multi_scale,
+                scale_range=scale_range,
+                scale_steps=scale_steps,
+                preprocess=preprocess,
+            )
         except Exception as e:
             logger.error(f"Error finding image: {e}")
             return (False, None) if return_result else False
