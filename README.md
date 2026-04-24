@@ -75,12 +75,6 @@ export HDC_SERVER_PORT=7035
 ```bash
 pip3 install -U hmdriver2
 ```
-如果需要使用[屏幕录屏](#屏幕录屏) 功能，则需要安装额外依赖`opencv-python` 
-(由于`opencv-python`比较大，因此没有写入到主依赖中，按需安装)
-
-```bash
-pip3 install -U "hmdriver2[opencv-python]"
-```
 
 
 4. 接下来就可以愉快的进行脚本开发了 😊😊

@@ -709,20 +709,45 @@ class Driver:
     ) -> Point:
         """
         Click using pixel coordinates from a screenshot image.
+        
+        Args:
+            x: X coordinate in screenshot pixels
+            y: Y coordinate in screenshot pixels
+            screenshot_path: Path to screenshot image
+            assume_in_bounds: Whether to clamp coordinates to image bounds
+            
+        Returns:
+            Point: The actual coordinates clicked on the device
         """
         img_w, img_h = image_size(screenshot_path)
         if img_w <= 0 or img_h <= 0:
-            raise ValueError("invalid screenshot size")
+            raise ValueError(f"Invalid screenshot size: {img_w}x{img_h}")
 
         if assume_in_bounds:
             x = max(0, min(int(x), img_w - 1))
             y = max(0, min(int(y), img_h - 1))
 
         dev_w, dev_h = self.display_size
-        dx = int(round(x * (dev_w / float(img_w))))
-        dy = int(round(y * (dev_h / float(img_h))))
+        if dev_w <= 0 or dev_h <= 0:
+            raise RuntimeError("Cannot get device display size")
+
+        # Calculate scaling factors
+        scale_x = dev_w / float(img_w)
+        scale_y = dev_h / float(img_h)
+        
+        # Apply scaling
+        dx = int(round(x * scale_x))
+        dy = int(round(y * scale_y))
+        
+        # Clamp to device bounds
         dx = max(0, min(dx, dev_w - 1))
         dy = max(0, min(dy, dev_h - 1))
+
+        logger.debug(
+            f"click_from_screenshot: screenshot={img_w}x{img_h}, "
+            f"device={dev_w}x{dev_h}, input=({x},{y}), output=({dx},{dy}), "
+            f"scale=({scale_x:.2f}, {scale_y:.2f})"
+        )
 
         self._invoke("Driver.click", args=[dx, dy])
         return Point(dx, dy)
@@ -732,39 +757,96 @@ class Driver:
         template_path: str,
         threshold: float = 0.85,
         grayscale: bool = True,
-        method: str = "snapshot_display",
-    ) -> bool:
+        method: str = "screenCap",
+        return_result: bool = False,
+    ) -> Union[bool, Tuple[bool, Optional["MatchResult"]]]:
         """
         Screenshot -> template match -> click (OpenCV).
+        
+        Args:
+            template_path: Path to template image to find
+            threshold: Matching threshold (0.0-1.0), default 0.85
+            grayscale: Whether to use grayscale matching (faster)
+            method: Screenshot method ("screenCap" or "snapshot_display")
+            return_result: Whether to return the match result
+            
+        Returns:
+            bool: True if found and clicked, False otherwise
+            Or tuple (bool, MatchResult) if return_result=True
         """
-        from ._vision import find_image
+        from ._vision import find_image, MatchResult
 
         shot = self._temp_screenshot(method=method)
-        r = find_image(shot, template_path, threshold=threshold, grayscale=grayscale)
+        try:
+            r = find_image(shot, template_path, threshold=threshold, grayscale=grayscale)
+        except Exception as e:
+            logger.error(f"Error finding image: {e}")
+            return (False, None) if return_result else False
+            
         if r is None:
-            return False
+            logger.debug(f"Image not found: {template_path}, threshold={threshold}")
+            return (False, None) if return_result else False
+            
         cx, cy = r.center
-        self.click_from_screenshot(cx, cy, shot)
-        return True
+        logger.debug(
+            f"Image found: {template_path}, score={r.score:.4f}, "
+            f"position=({r.x},{r.y}), size=({r.w}x{r.h}), center=({cx},{cy})"
+        )
+        
+        try:
+            clicked_point = self.click_from_screenshot(cx, cy, shot)
+            logger.debug(f"Clicked at: {clicked_point}")
+        except Exception as e:
+            logger.error(f"Error clicking image: {e}")
+            return (False, r) if return_result else False
+            
+        return (True, r) if return_result else True
 
     def click_color(
         self,
         rgb: Tuple[int, int, int],
         tolerance: int = 10,
         region: Optional[Tuple[int, int, int, int]] = None,
-        method: str = "snapshot_display",
-    ) -> bool:
+        method: str = "screenCap",
+        return_result: bool = False,
+    ) -> Union[bool, Tuple[bool, Optional[Tuple[int, int]]]]:
         """
         Screenshot -> find a pixel by color -> click (OpenCV+NumPy).
+        
+        Args:
+            rgb: Target color in RGB format (0-255, 0-255, 0-255)
+            tolerance: Per-channel color tolerance (0-255), default 10
+            region: Optional search region (x1, y1, x2, y2) in screenshot pixels
+            method: Screenshot method ("screenCap" or "snapshot_display")
+            return_result: Whether to return the found position
+            
+        Returns:
+            bool: True if found and clicked, False otherwise
+            Or tuple (bool, (x, y)) if return_result=True
         """
         from ._vision import find_color
 
         shot = self._temp_screenshot(method=method)
-        pt = find_color(shot, rgb=rgb, tolerance=tolerance, region=region)
+        try:
+            pt = find_color(shot, rgb=rgb, tolerance=tolerance, region=region)
+        except Exception as e:
+            logger.error(f"Error finding color: {e}")
+            return (False, None) if return_result else False
+            
         if pt is None:
-            return False
-        self.click_from_screenshot(pt[0], pt[1], shot)
-        return True
+            logger.debug(f"Color not found: rgb={rgb}, tolerance={tolerance}, region={region}")
+            return (False, None) if return_result else False
+            
+        logger.debug(f"Color found: rgb={rgb}, position=({pt[0]},{pt[1]})")
+        
+        try:
+            clicked_point = self.click_from_screenshot(pt[0], pt[1], shot)
+            logger.debug(f"Clicked at: {clicked_point}")
+        except Exception as e:
+            logger.error(f"Error clicking color: {e}")
+            return (False, pt) if return_result else False
+            
+        return (True, pt) if return_result else True
 
     def shell(self, cmd) -> CommandResult:
         return self.hdc.shell(cmd)
