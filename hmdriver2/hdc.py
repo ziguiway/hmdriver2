@@ -209,27 +209,52 @@ class HdcWrapper:
         return self.shell(f"aa force-stop {package_name}")
 
     def current_app(self) -> Tuple[Optional[str], Optional[str]]:
-        """
-        Get the current foreground application information.
-        
-        Returns:
-            Tuple[Optional[str], Optional[str]]: (package_name, page_name) or (None, None)
-        """
-        data: CommandResult = self.shell("aa dump -l")
-        if not data or not data.output:
+            """
+            Get the current foreground application information.
+            
+            Returns:
+                Tuple[Optional[str], Optional[str]]: (package_name, page_name) or (None, None)
+                
+            Examples:
+                >>> current_app()
+                ('cn.rayneo.mercury', 'cn.rayneo.mercury.SplashActivity')
+            """
+            data: CommandResult = self.shell("aa dump -l")
+            if not data or not data.output:
+                return (None, None)
+            
+            output = data.output
+            
+            # 找到所有 Mission 块，定位 FOREGROUND 状态的任务
+            # 使用正则匹配 Mission 块
+            mission_pattern = r'Mission ID #\d+(.*?)(?=Mission ID #\d+|$)'
+            missions = re.findall(mission_pattern, output, re.DOTALL)
+            
+            for mission in missions:
+                if 'state #FOREGROUND' in mission:
+                    # 方法1：从 mission name 中提取真实应用信息（最准确）
+                    mission_name_match = re.search(r'mission name #\[#([^\]]+)\]', mission)
+                    if mission_name_match:
+                        mission_name = mission_name_match.group(1)
+                        parts = mission_name.split(':')
+                        
+                        if len(parts) >= 3:
+                            # 格式: package:type:ability
+                            package_name = parts[0]      # cn.rayneo.mercury
+                            page_name = parts[2]         # cn.rayneo.mercury.SplashActivity
+                            return (package_name, page_name)
+                        elif len(parts) >= 1:
+                            return (parts[0], None)
+                    
+                    # 方法2：如果 mission name 解析失败，使用 bundle name 作为备选
+                    bundle_match = re.search(r'bundle name \[([^\]]+)\]', mission)
+                    main_match = re.search(r'main name \[([^\]]+)\]', mission)
+                    if bundle_match:
+                        return (bundle_match.group(1), main_match.group(1) if main_match else None)
+                    
+                    break
+            
             return (None, None)
-        
-        output = data.output
-        
-        # 一步到位：先找 FOREGROUND，再提取 mission name 和 main name
-        # 匹配包含 state #FOREGROUND 的完整块，提取真实包名和页面名
-        pattern = r'Mission ID #\d+[\s\S]*?state #FOREGROUND[\s\S]*?mission name #\[#([^:]+):[\s\S]*?main name \[([^\]]+)\]'
-        
-        match = re.search(pattern, output)
-        if match:
-            return (match.group(1), match.group(2))
-        
-        return (None, None)
 
     def wakeup(self):
         self.shell("power-shell wakeup")
