@@ -208,37 +208,28 @@ class HdcWrapper:
     def stop_app(self, package_name: str):
         return self.shell(f"aa force-stop {package_name}")
 
-    def current_app(self) -> Tuple[str, str]:
+    def current_app(self) -> Tuple[Optional[str], Optional[str]]:
         """
         Get the current foreground application information.
-
+        
         Returns:
-            Tuple[str, str]: A tuple contain the package_name andpage_name of the foreground application.
-                             If no foreground application is found, returns (None, None).
+            Tuple[Optional[str], Optional[str]]: (package_name, page_name) or (None, None)
         """
-
-        def __extract_info(output: str):
-            results = []
-
-            mission_blocks = re.findall(r'Mission ID #[\s\S]*?isKeepAlive: false\s*}', output)
-            if not mission_blocks:
-                return results
-
-            for block in mission_blocks:
-                if 'state #FOREGROUND' in block:
-                    bundle_name_match = re.search(r'bundle name \[(.*?)\]', block)
-                    main_name_match = re.search(r'main name \[(.*?)\]', block)
-                    if bundle_name_match and main_name_match:
-                        package_name = bundle_name_match.group(1)
-                        page_name = main_name_match.group(1)
-                        results.append((package_name, page_name))
-
-            return results
-
         data: CommandResult = self.shell("aa dump -l")
+        if not data or not data.output:
+            return (None, None)
+        
         output = data.output
-        results = __extract_info(output)
-        return results[0] if results else (None, None)
+        
+        # 一步到位：先找 FOREGROUND，再提取 mission name 和 main name
+        # 匹配包含 state #FOREGROUND 的完整块，提取真实包名和页面名
+        pattern = r'Mission ID #\d+[\s\S]*?state #FOREGROUND[\s\S]*?mission name #\[#([^:]+):[\s\S]*?main name \[([^\]]+)\]'
+        
+        match = re.search(pattern, output)
+        if match:
+            return (match.group(1), match.group(2))
+        
+        return (None, None)
 
     def wakeup(self):
         self.shell("power-shell wakeup")
