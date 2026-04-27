@@ -8,7 +8,6 @@ from typing import Optional, Tuple
 @dataclass(frozen=True)
 class MatchResult:
     score: float
-    # top-left in screenshot pixels
     x: int
     y: int
     w: int
@@ -22,7 +21,6 @@ class MatchResult:
 def _require_cv2():
     try:
         import cv2  # type: ignore
-
         return cv2
     except Exception as e:
         raise RuntimeError(
@@ -30,29 +28,6 @@ def _require_cv2():
             'Install with `pip install -U "hmdriver2[opencv-python]"` '
             "(opencv-python-headless)."
         ) from e
-
-
-def preprocess_image(image, normalize: bool = True, equalize: bool = True):
-    """
-    Image preprocessing: normalization and contrast enhancement.
-    
-    Args:
-        image: Input image (grayscale)
-        normalize: Whether to apply contrast normalization
-        equalize: Whether to apply histogram equalization
-    
-    Returns:
-        Processed image
-    """
-    cv2 = _require_cv2()
-    
-    if equalize and len(image.shape) == 2:  # Only for grayscale
-        image = cv2.equalizeHist(image)
-    
-    if normalize:
-        image = cv2.normalize(image, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
-    
-    return image
 
 
 def find_image(
@@ -63,71 +38,60 @@ def find_image(
     multi_scale: bool = True,
     scale_range: Tuple[float, float] = (0.5, 2.0),
     scale_steps: int = 30,
-    preprocess: bool = True,
 ) -> Optional[MatchResult]:
     """
-    Find *template_path* in *screenshot_path* using OpenCV template matching.
-    Supports multi-scale matching for resolution adaptation.
+    Find template in screenshot using multi-scale template matching.
     
     Args:
         screenshot_path: Path to screenshot image
-        template_path: Path to template image to find
-        threshold: Matching threshold (0.0-1.0), default 0.85
-        grayscale: Whether to use grayscale matching (faster)
-        multi_scale: Enable multi-scale matching for resolution adaptation
-        scale_range: (min_scale, max_scale) for multi-scale search
-        scale_steps: Number of scale steps to search
-        preprocess: Whether to apply preprocessing (normalization/equalization)
-    
+        template_path: Path to template image
+        threshold: Matching threshold (0.0-1.0)
+        grayscale: Use grayscale matching
+        multi_scale: Enable multi-scale matching
+        scale_range: (min_scale, max_scale)
+        scale_steps: Number of scale steps
+        
     Returns:
-        MatchResult if found with score >= threshold, else None
+        MatchResult if found, else None
     """
     cv2 = _require_cv2()
     import numpy as np  # type: ignore
 
+    # Read images
     flag = cv2.IMREAD_GRAYSCALE if grayscale else cv2.IMREAD_COLOR
-    img = cv2.imread(screenshot_path, flag)
-    tpl = cv2.imread(template_path, flag)
+    screenshot = cv2.imread(screenshot_path, flag)
+    template = cv2.imread(template_path, flag)
     
-    if img is None:
-        raise FileNotFoundError(f"cannot read screenshot: {screenshot_path}")
-    if tpl is None:
-        raise FileNotFoundError(f"cannot read template: {template_path}")
+    if screenshot is None:
+        raise FileNotFoundError(f"Cannot read screenshot: {screenshot_path}")
+    if template is None:
+        raise FileNotFoundError(f"Cannot read template: {template_path}")
 
-    ih, iw = img.shape[:2]
-    th, tw = tpl.shape[:2]
-    
-    if tw <= 0 or th <= 0:
-        return None
-    
-    # Preprocess images if enabled
-    if preprocess and grayscale:
-        img = preprocess_image(img)
-        tpl = preprocess_image(tpl)
-    
+    h, w = template.shape[:2]
     best_match = None
     best_score = float(threshold)
-    
+
     if multi_scale:
-        # Multi-scale matching
+        # Multi-scale matching (user's verified logic)
         min_scale, max_scale = scale_range
-        screenshot_h, screenshot_w = img.shape[:2]
+        screenshot_h, screenshot_w = screenshot.shape[:2]
         
         for scale in np.linspace(min_scale, max_scale, scale_steps)[::-1]:
-            new_w = int(tw * scale)
-            new_h = int(th * scale)
+            new_w = int(w * scale)
+            new_h = int(h * scale)
             
-            # Skip if resized template is larger than screenshot
+            # Skip if resized template exceeds screenshot bounds
             if new_w <= 0 or new_h <= 0 or new_w > screenshot_w or new_h > screenshot_h:
                 continue
             
             # Resize template
-            resized_tpl = cv2.resize(tpl, (new_w, new_h))
+            resized = cv2.resize(template, (new_w, new_h))
             
             # Template matching
-            res = cv2.matchTemplate(img, resized_tpl, cv2.TM_CCOEFF_NORMED)
-            _, max_val, _, max_loc = cv2.minMaxLoc(res)
+            result = cv2.matchTemplate(screenshot, resized, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, max_loc = cv2.minMaxLoc(result)
             
+            # Update best match
             if max_val >= best_score:
                 best_score = float(max_val)
                 best_match = MatchResult(
@@ -138,20 +102,20 @@ def find_image(
                     h=new_h
                 )
     else:
-        # Single-scale matching (original behavior)
-        if tw > iw or th > ih:
+        # Single-scale matching
+        if w > screenshot.shape[1] or h > screenshot.shape[0]:
             return None
         
-        res = cv2.matchTemplate(img, tpl, cv2.TM_CCOEFF_NORMED)
-        _, max_val, _, max_loc = cv2.minMaxLoc(res)
+        result = cv2.matchTemplate(screenshot, template, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, max_loc = cv2.minMaxLoc(result)
         
         if float(max_val) >= float(threshold):
             best_match = MatchResult(
                 score=float(max_val),
                 x=int(max_loc[0]),
                 y=int(max_loc[1]),
-                w=int(tw),
-                h=int(th)
+                w=int(w),
+                h=int(h)
             )
     
     return best_match
@@ -165,24 +129,14 @@ def find_color(
 ) -> Optional[Tuple[int, int]]:
     """
     Find the first pixel matching rgb within tolerance.
-
-    Args:
-        screenshot_path: screenshot file path.
-        rgb: target color in RGB.
-        tolerance: per-channel absolute tolerance (0-255).
-        region: optional (x1, y1, x2, y2) in screenshot pixels.
-
-    Returns:
-        (x, y) in screenshot pixels if found, else None.
     """
     cv2 = _require_cv2()
     import numpy as np  # type: ignore
 
     img = cv2.imread(screenshot_path, cv2.IMREAD_COLOR)
     if img is None:
-        raise FileNotFoundError(f"cannot read screenshot: {screenshot_path}")
+        raise FileNotFoundError(f"Cannot read screenshot: {screenshot_path}")
 
-    # OpenCV uses BGR
     bgr = np.array([rgb[2], rgb[1], rgb[0]], dtype=np.int16)
     tol = int(max(0, min(255, tolerance)))
 

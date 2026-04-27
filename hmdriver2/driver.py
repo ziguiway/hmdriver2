@@ -768,11 +768,9 @@ class Driver:
         method: str = "snapshot_display",
         return_result: bool = False,
         draw_box: bool = True,
-        # Multi-scale matching parameters for resolution adaptation
         multi_scale: bool = True,
         scale_range: Tuple[float, float] = (0.5, 2.0),
         scale_steps: int = 30,
-        preprocess: bool = True,
     ) -> Union[bool, Tuple[bool, Optional["MatchResult"]]]:
         """
         Screenshot -> template match -> click (OpenCV).
@@ -784,12 +782,9 @@ class Driver:
             method: Screenshot method ("screenCap" or "snapshot_display")
             return_result: Whether to return the match result
             draw_box: Whether to draw a bounding box on the screenshot
-            
-            # Multi-scale matching parameters for resolution adaptation
             multi_scale: Enable multi-scale matching for resolution adaptation
             scale_range: (min_scale, max_scale) for multi-scale search
             scale_steps: Number of scale steps to search
-            preprocess: Whether to apply image preprocessing (normalization/equalization)
             
         Returns:
             bool: True if found and clicked, False otherwise
@@ -807,7 +802,6 @@ class Driver:
                 multi_scale=multi_scale,
                 scale_range=scale_range,
                 scale_steps=scale_steps,
-                preprocess=preprocess,
             )
         except Exception as e:
             logger.error(f"Error finding image: {e}")
