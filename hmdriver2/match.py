@@ -86,6 +86,8 @@ _RESOLVE: Dict[str, Tuple[str, Optional[MatchPattern]]] = {
     "selected": ("selected", None),
     "checked": ("checked", None),
     "checkable": ("checkable", None),
+    "visible": ("visible", None),
+    "password": ("password", None),
 }
 
 RESOLVED_SELECTOR_KEY = frozenset(_RESOLVE.keys())
