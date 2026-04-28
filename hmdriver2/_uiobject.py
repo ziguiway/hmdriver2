@@ -52,7 +52,7 @@ class UiObject:
         if "type" in self._kwargs and "className" in self._kwargs:
             raise ReferenceError("use only one of `type` and `className`")
 
-    def _invoke_on(self, on_name: str, value, pattern: Optional[MatchPattern]) -> str:
+    def _invoke_on(self, on_name: str, value, pattern: Optional[MatchPattern], this: str = "On#seed") -> str:
         last_err: Optional[Exception] = None
         arg_lists: List[list] = [on_args(value, pattern)]
         if pattern is not None:
@@ -61,7 +61,7 @@ class UiObject:
         for args in arg_lists:
             try:
                 resp: HypiumResponse = self._client.invoke(
-                    f"On.{on_name}", this="On#seed", args=args
+                    f"On.{on_name}", this=this, args=args
                 )
                 return resp.result
             except InvokeHypiumError as e:
@@ -72,7 +72,7 @@ class UiObject:
             if alt:
                 try:
                     r = self._client.invoke(
-                        f"On.{alt}", this="On#seed", args=[value]
+                        f"On.{alt}", this=this, args=[value]
                     )
                     return r.result
                 except InvokeHypiumError as e:
@@ -182,9 +182,10 @@ class UiObject:
         return self.__get_by()
 
     def __get_by(self) -> ByData:
+        this = "On#seed"
         for k, v in self._kwargs.items():
             on_name, pat = resolve_on_call(k)
-            this = self._invoke_on(on_name, v, pat)
+            this = self._invoke_on(on_name, v, pat, this)
 
         if self._isBefore:
             resp: HypiumResponse = self._client.invoke(
